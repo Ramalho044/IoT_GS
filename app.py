@@ -12,7 +12,7 @@ from tensorflow.keras.layers import Conv2D, MaxPooling2D, Dense, Flatten, Dropou
 # CONFIG STREAMLIT
 # -------------------------------------------------------------
 st.set_page_config(
-    page_title="Bem-Estar IA",
+    page_title="HealthHelp IA",
     page_icon="🧠",
     layout="wide"
 )
@@ -176,7 +176,7 @@ def analisar_rotina(sono, trabalho, lazer, exercicio):
 # -------------------------------------------------------------
 # INTERFACE
 # -------------------------------------------------------------
-st.title("🧠 Bem-Estar IA")
+st.title("🧠 HealthHelp IA")
 st.write("Aplicativo de análise emocional e hábitos usando Deep Learning.")
 
 tabs = st.tabs(["📸 Análise de Emoções", "📆 Avaliação de Rotina"])
