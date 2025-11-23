@@ -24,51 +24,45 @@ body { background-color: #0f0f0f; }
 
 
 # -------------------------------------------------------------
-# CRIAR MODELO DE EMOÇÕES (FALLBACK/ESTRUTURA)
+# CRIAR MODELO DE EMOÇÕES (FALLBACK)
 # -------------------------------------------------------------
 def criar_modelo_emocoes():
     model = Sequential([
         Conv2D(32, (3,3), activation='relu', input_shape=(48,48,1)),
         MaxPooling2D(2,2),
-
         Conv2D(64, (3,3), activation='relu'),
         MaxPooling2D(2,2),
-
         Conv2D(128, (3,3), activation='relu'),
         MaxPooling2D(2,2),
-
         Flatten(),
         Dense(128, activation='relu'),
         Dropout(0.3),
         Dense(7, activation='softmax')
     ])
-
-    model.compile(
-        optimizer='adam',
-        loss='categorical_crossentropy',
-        metrics=['accuracy']
-    )
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     return model
 
 
 # -------------------------------------------------------------
-# CARREGAR MODELO CORRETO
+# CARREGAR MODELO (CORREÇÃO DE COMPATIBILIDADE)
 # -------------------------------------------------------------
 @st.cache_resource
 def carregar_modelo():
-    # Tenta carregar o arquivo que você já tem treinado
     arquivo_modelo = "emotion_model.h5"
     
     if os.path.exists(arquivo_modelo):
         try:
-            model = tf.keras.models.load_model(arquivo_modelo)
+            # compile=False é CRÍTICO para evitar erros de versão entre onde foi treinado e o Streamlit
+            model = tf.keras.models.load_model(arquivo_modelo, compile=False)
+            
+            # Recompilamos manualmente apenas para garantir
+            model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
             return model
         except Exception as e:
-            st.error(f"Erro ao ler o arquivo do modelo: {e}")
+            st.error(f"Erro ao carregar modelo: {e}")
             return None
     else:
-        # Se não achar o arquivo treinado, avisa e cria um vazio (apenas para não quebrar o app)
-        st.warning("⚠️ AVISO: O arquivo 'emotion_model.h5' não foi encontrado. Usando modelo não treinado (resultados serão aleatórios). Verifique se o arquivo está na pasta.")
+        st.warning("⚠️ 'emotion_model.h5' não encontrado. Usando modelo vazio (aleatório).")
         model = criar_modelo_emocoes()
         return model
 
@@ -77,50 +71,67 @@ emotion_labels = ["Raiva", "Nojo", "Medo", "Feliz", "Triste", "Surpreso", "Neutr
 
 
 # -------------------------------------------------------------
-# FUNÇÃO DE DETECÇÃO DE EMOÇÃO COM RECORTE DE ROSTO
+# FUNÇÃO DE DETECÇÃO (CORREÇÃO DE SHAPE DINÂMICO)
 # -------------------------------------------------------------
 def detectar_emocao(image):
-    # Carrega classificador de rosto (padrão do OpenCV)
+    # Carrega classificador de rosto
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-    # Se vier RGBA (png) → converter para RGB
+    # Converter para RGB se necessário
     if image.shape[-1] == 4:
         image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
 
-    # RGB → BGR (padrão OpenCV)
+    # BGR e Gray para detecção
     image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-
-    # Escala de Cinza
     img_gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
 
-    # DETECÇÃO DE ROSTO
+    # Detecta rostos
     faces = face_cascade.detectMultiScale(img_gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
 
-    # Se não achar rosto, retorna aviso
     if len(faces) == 0:
         return None, None
 
-    # Pega o maior rosto encontrado (caso tenha mais de um, foca no primeiro)
+    # Pega o primeiro rosto
     x, y, w, h = faces[0]
     
-    # Desenha um retângulo na imagem original para mostrar onde achou o rosto (opcional, mas legal visualmente)
+    # Desenha retângulo visual
     cv2.rectangle(image, (x, y), (x+w, y+h), (0, 255, 0), 2)
     
-    # Recorta a região do rosto (ROI)
+    # Recorta ROI (rosto)
     roi_gray = img_gray[y:y+h, x:x+w]
 
-    # Redimensiona para 48x48 (tamanho que a IA espera)
-    roi_gray = cv2.resize(roi_gray, (48, 48), interpolation=cv2.INTER_AREA)
+    # --- TRATAMENTO DINÂMICO DE ENTRADA ---
+    try:
+        # Tenta pegar o formato que o modelo espera (ex: 48x48x1 ou 48x48x3)
+        input_shape = emotion_model.input_shape
+        # input_shape geralmente é (None, Altura, Largura, Canais)
+        req_height = input_shape[1]
+        req_width = input_shape[2]
+        req_channels = input_shape[3]
+    except:
+        # Padrão caso não consiga ler
+        req_height, req_width = 48, 48
+        req_channels = 1
 
-    # Normalizar (0 a 1)
-    roi_gray = roi_gray.astype("float32") / 255.0
+    # 1. Redimensionar para o tamanho que o modelo quer
+    roi_resized = cv2.resize(roi_gray, (req_width, req_height), interpolation=cv2.INTER_AREA)
+    
+    # 2. Normalizar
+    roi_float = roi_resized.astype("float32") / 255.0
 
-    # Ajustar formato para o Keras: (1, 48, 48, 1)
-    roi_gray = np.expand_dims(roi_gray, axis=-1)
-    roi_gray = np.expand_dims(roi_gray, axis=0)
+    # 3. Ajustar Canais (1 para Grayscale, 3 para RGB)
+    if req_channels == 1:
+        # Adiciona dimensão de canal (48, 48) -> (48, 48, 1)
+        roi_final = np.expand_dims(roi_float, axis=-1)
+    else:
+        # Se o modelo quiser RGB, convertemos o Grayscale de volta para RGB
+        roi_final = cv2.cvtColor(roi_float, cv2.COLOR_GRAY2RGB)
+
+    # 4. Adicionar Batch Dimension: (1, 48, 48, 1)
+    roi_final = np.expand_dims(roi_final, axis=0)
 
     # Predição
-    preds = emotion_model.predict(roi_gray)[0]
+    preds = emotion_model.predict(roi_final)[0]
     emotion = emotion_labels[np.argmax(preds)]
 
     return emotion, preds
@@ -225,37 +236,36 @@ with tabs[0]:
         image_pil = Image.open(foto)
         img_np = np.array(image_pil)
         
-        # Exibe a imagem original
-        st.image(image_pil, caption="Imagem enviada", use_container_width=True)
-
+        # Exibe a imagem original com o retângulo se detectado
+        col_img, col_res = st.columns([1, 2])
+        
         if st.button("Analisar emoções"):
             with st.spinner("Detectando rosto e analisando emoção..."):
                 
                 emocao, probs = detectar_emocao(img_np)
 
                 if emocao is None:
-                    st.error("⚠️ Não foi possível detectar um rosto na imagem. Tente outra foto mais clara ou mais próxima.")
+                    st.error("⚠️ Não foi possível detectar um rosto na imagem. Tente uma foto mais próxima e frontal.")
+                    st.image(image_pil, caption="Imagem Original", width=300)
                 else:
+                    # Exibe a imagem com o rosto marcado (img_np foi modificado pela função detectar_emocao com o retângulo)
+                    st.image(img_np, caption="Rosto Detectado", width=300)
+                    
                     st.success(f"🎭 Emoção predominante: **{emocao}**")
 
-                    # Colunas para exibir gráfico e dicas
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("### 📊 Probabilidades:")
-                        # Ordena para mostrar as maiores probabilidades primeiro
-                        sorted_indices = np.argsort(probs)[::-1]
-                        for i in sorted_indices:
-                            label = emotion_labels[i]
-                            p = probs[i]
-                            if p > 0.01: # Só mostra se tiver mais de 1% de chance
-                                st.progress(float(p))
-                                st.write(f"{label}: {p*100:.1f}%")
+                    st.markdown("### 📊 Probabilidades:")
+                    # Ordena para mostrar as maiores probabilidades primeiro
+                    sorted_indices = np.argsort(probs)[::-1]
+                    for i in sorted_indices:
+                        label = emotion_labels[i]
+                        p = probs[i]
+                        if p > 0.01: # Só mostra se tiver mais de 1%
+                            st.progress(float(p))
+                            st.write(f"{label}: {p*100:.1f}%")
 
-                    with col2:
-                        st.markdown("### 💡 Recomendações:")
-                        for dica in sugestoes_emocao(emocao):
-                            st.info(f"- {dica}")
+                    st.markdown("### 💡 Recomendações:")
+                    for dica in sugestoes_emocao(emocao):
+                        st.info(f"- {dica}")
 
 
 # =============================================================
