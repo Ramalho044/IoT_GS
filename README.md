@@ -1,12 +1,12 @@
 
-# 🧠 Bem-Estar IA
+# 🧠 HealthHelp IA
 Aplicação web baseada em **Deep Learning e Visão Computacional** para análise emocional e avaliação de rotina, com foco em promover **bem-estar mental e equilíbrio diário**.  
 O projeto utiliza uma **rede neural convolucional (CNN)** para classificar emoções faciais e integrar esses resultados a um sistema de recomendações personalizadas.
 
 ---
 
 ## 🎯 Objetivo do Projeto
-O Bem-Estar IA foi desenvolvido para:
+O HealthHelp IA foi desenvolvido para:
 
 - Analisar a **emoção do usuário** a partir de uma imagem facial  
 - Avaliar a **rotina diária** (sono, trabalho, lazer e exercícios)  
